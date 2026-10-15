@@ -1,0 +1,38 @@
+name: Bot formulario diario
+
+on:
+  schedule:
+    - cron: "30 11 * * *"   # 11:30 UTC = 6:30 AM en Colombia
+  workflow_dispatch:         # permite ejecutarlo a mano para probar
+
+jobs:
+  enviar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TZ: America/Bogota
+      NOMBRE: ${{ secrets.NOMBRE }}
+      CEDULA: ${{ secrets.CEDULA }}
+      CIUDAD: ${{ secrets.CIUDAD }}
+      PLACA: ${{ secrets.PLACA }}
+      MARCA: ${{ secrets.MARCA }}
+      MODELO: ${{ secrets.MODELO }}
+      CILINDRAJE: ${{ secrets.CILINDRAJE }}
+      KM_INICIAL: ${{ secrets.KM_INICIAL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - run: python bot_formulario.py
+
+      - name: Guardar captura si falla
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error
+          path: error.png
