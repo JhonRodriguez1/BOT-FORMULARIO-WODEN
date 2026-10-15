@@ -87,7 +87,11 @@ def crear_driver():
     os.makedirs(PERFIL_BOT, exist_ok=True)
     limpiar_bloqueos()
 
-    subprocess.Popen([
+       subprocess.Popen([
         CHROME_EXE,
         f"--remote-debugging-port={PUERTO}",
         f"--user-data-dir={PERFIL_BOT}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--start-maximized",
+    ])
