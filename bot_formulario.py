@@ -82,12 +82,12 @@ def crear_driver():
         opciones.add_experimental_option("prefs", {"intl.accept_languages": "es-CO,es"})
         return webdriver.Chrome(options=opciones)
 
-    # ----- Modo Windows (tu PC) -----
+       # ----- Modo Windows (tu PC) -----
     cerrar_chrome()
     os.makedirs(PERFIL_BOT, exist_ok=True)
     limpiar_bloqueos()
 
-       subprocess.Popen([
+    subprocess.Popen([
         CHROME_EXE,
         f"--remote-debugging-port={PUERTO}",
         f"--user-data-dir={PERFIL_BOT}",
@@ -95,3 +95,16 @@ def crear_driver():
         "--no-default-browser-check",
         "--start-maximized",
     ])
+
+    for _ in range(30):
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{PUERTO}/json/version", timeout=1)
+            break
+        except Exception:
+            time.sleep(1)
+    else:
+        raise RuntimeError("Chrome no abrió. Revisa la ruta de CHROME_EXE o el antivirus.")
+
+    opciones = webdriver.ChromeOptions()
+    opciones.debugger_address = f"127.0.0.1:{PUERTO}"
+    return webdriver.Chrome(options=opciones)
