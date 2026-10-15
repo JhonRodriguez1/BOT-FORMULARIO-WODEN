@@ -14,10 +14,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 URL = "https://forms.cloud.microsoft/pages/responsepage.aspx?id=uvfTxJJ4nUy6BgKoT5oJle5LM_5RQbhEiwJCr2Dc7x5UNzJVQVgwTVFDREE3T0RLU1JZWVVXMUVUSS4u&origin=lprLink&route=shorturl"
 
 # ¿Se está ejecutando en GitHub Actions?
-EN_GITHUB = os.environ.get("GITHUB_ACTIONS") == "False"
+EN_GITHUB = os.environ.get("GITHUB_ACTIONS") == "true"
 
-# ---------- Modo de prueba: True = solo prueba la fecha (página 1) y se detiene ----------
-SOLO_PROBAR_FECHA = True   # <-- ponlo en False cuando la fecha funcione
+# ---------- Modo de prueba: True = solo prueba la fecha (página 1) y NO envía ----------
+SOLO_PROBAR_FECHA = False
 
 # ---------- Datos fijos (en GitHub se leen de los Secrets; en tu PC se usan estos valores) ----------
 NOMBRE = os.environ.get("NOMBRE") or "JHON ALEXANDER RODRIGUEZ NIÑO"
@@ -51,7 +51,9 @@ PUERTO = 9222
 # ======================= FUNCIONES AUXILIARES =======================
 
 def cerrar_chrome():
-    """Cierra Chrome y chromedriver para evitar perfiles en uso (solo Windows)."""
+    """Cierra Chrome y chromedriver (solo Windows)."""
+    if os.name != "nt":
+        return
     for proceso in ("chrome.exe", "chromedriver.exe"):
         subprocess.run(["taskkill", "/F", "/IM", proceso],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -59,7 +61,7 @@ def cerrar_chrome():
 
 
 def limpiar_bloqueos():
-    """Borra archivos que Chrome deja cuando se cierra mal."""
+    """Borra archivos que Chrome deja cuando se cierra mal (solo Windows)."""
     for nombre in ("lockfile", "SingletonLock", "SingletonCookie",
                    "SingletonSocket", "DevToolsActivePort"):
         ruta = os.path.join(PERFIL_BOT, nombre)
@@ -162,16 +164,17 @@ def esperar_formulario(driver):
 
 
 def poner_fecha_hoy(driver, wait):
-    """Pone la fecha de hoy: prueba varios formatos y, si falla, usa el calendario."""
+    """Pone la fecha de hoy. En GitHub usa el calendario primero; en tu PC, el teclado primero."""
     xpath_campo = "//input[starts-with(@id,'DatePicker')]"
     wait.until(EC.element_to_be_clickable((By.XPATH, xpath_campo)))
     time.sleep(2)
 
     hoy = datetime.now()
-    formatos = [f"{hoy.month}/{hoy.day}/{hoy.year}",      # M/d/yyyy (EE. UU.)
-                hoy.strftime("%m/%d/%Y"),                 # MM/dd/yyyy
-                hoy.strftime("%d/%m/%Y"),                 # dd/MM/yyyy
-                f"{hoy.day}/{hoy.month}/{hoy.year}"]      # d/M/yyyy
+    # El campo pide d/MM/yyyy (ej. 4/10/2026 o 14/10/2026)
+    formatos = [f"{hoy.day}/{hoy.month:02d}/{hoy.year}",
+                hoy.strftime("%d/%m/%Y"),
+                f"{hoy.month}/{hoy.day}/{hoy.year}",
+                hoy.strftime("%m/%d/%Y")]
 
     info = driver.execute_script(
         "var e=document.querySelector(\"input[id^='DatePicker']\");"
@@ -187,35 +190,42 @@ def poner_fecha_hoy(driver, wait):
         return driver.execute_script(
             "return document.querySelectorAll(\"[role='alert']\").length;") > 0
 
-    # Método 1: escribir en distintos formatos
-    for texto in formatos:
+    def por_calendario():
         campo = driver.find_element(By.XPATH, xpath_campo)
         click_js(driver, campo)
-        campo.send_keys(Keys.CONTROL, "a")
-        campo.send_keys(Keys.DELETE)
-        for ch in texto:
-            campo.send_keys(ch)
-            time.sleep(0.1)
-        campo.send_keys(Keys.TAB)
+        time.sleep(1.5)
+        ok = driver.execute_script("""
+            const btn = document.querySelector("button[class*='dayIsToday']");
+            if (btn) { btn.click(); return true; }
+            return false;
+        """)
         time.sleep(1)
-        if valor() and not hay_error():
-            print(f"✅ Fecha puesta con formato '{texto}': {valor()}")
-            return
-        print(f"El campo rechazó '{texto}', pruebo otro formato...")
+        if ok and valor():
+            print("✅ Fecha puesta desde el calendario:", valor())
+            return True
+        return False
 
-    # Método 2: elegir hoy en el calendario (no depende del idioma)
-    campo = driver.find_element(By.XPATH, xpath_campo)
-    click_js(driver, campo)
-    time.sleep(1.5)
-    ok = driver.execute_script("""
-        const btn = document.querySelector("button[class*='dayIsToday']");
-        if (btn) { btn.click(); return true; }
-        return false;
-    """)
-    time.sleep(1)
-    if ok and valor():
-        print("✅ Fecha puesta desde el calendario:", valor())
-        return
+    def por_teclado():
+        for texto in formatos:
+            campo = driver.find_element(By.XPATH, xpath_campo)
+            click_js(driver, campo)
+            campo.send_keys(Keys.CONTROL, "a")
+            campo.send_keys(Keys.DELETE)
+            for ch in texto:
+                campo.send_keys(ch)
+                time.sleep(0.1)
+            campo.send_keys(Keys.TAB)
+            time.sleep(1)
+            if valor() and not hay_error():
+                print(f"✅ Fecha puesta con formato '{texto}': {valor()}")
+                return True
+            print(f"El campo rechazó '{texto}', pruebo otro formato...")
+        return False
+
+    metodos = [por_calendario, por_teclado] if EN_GITHUB else [por_teclado, por_calendario]
+    for metodo in metodos:
+        if metodo():
+            return
 
     raise Exception("No se pudo poner la fecha")
 
