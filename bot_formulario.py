@@ -14,7 +14,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 URL = "https://forms.cloud.microsoft/pages/responsepage.aspx?id=uvfTxJJ4nUy6BgKoT5oJle5LM_5RQbhEiwJCr2Dc7x5UNzJVQVgwTVFDREE3T0RLU1JZWVVXMUVUSS4u&origin=lprLink&route=shorturl"
 
 # ¿Se está ejecutando en GitHub Actions?
-EN_GITHUB = os.environ.get("GITHUB_ACTIONS") == "true"
+EN_GITHUB = os.environ.get("GITHUB_ACTIONS") == "False"
 
 # ---------- Modo de prueba: True = solo prueba la fecha (página 1) y se detiene ----------
 SOLO_PROBAR_FECHA = True   # <-- ponlo en False cuando la fecha funcione
