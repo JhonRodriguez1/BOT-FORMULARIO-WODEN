@@ -1,31 +1,36 @@
+import os
+import subprocess
+import time
+import urllib.request
+from datetime import datetime
+
 from selenium import webdriver
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
-from datetime import datetime
-import time
-import os
+from selenium.webdriver.support.ui import WebDriverWait
 
 URL = "https://forms.cloud.microsoft/pages/responsepage.aspx?id=uvfTxJJ4nUy6BgKoT5oJle5LM_5RQbhEiwJCr2Dc7x5UNzJVQVgwTVFDREE3T0RLU1JZWVVXMUVUSS4u&origin=lprLink&route=shorturl"
+
+# ¿Se está ejecutando en GitHub Actions?
+EN_GITHUB = os.environ.get("GITHUB_ACTIONS") == "true"
 
 # ---------- Modo de prueba: True = solo prueba la fecha (página 1) y se detiene ----------
 SOLO_PROBAR_FECHA = False
 
-# ---------- Datos fijos del conductor ----------
-NOMBRE = "JHON ALEXANDER RODRIGUEZ NIÑO"
-CEDULA = "1005039272"
-CIUDAD = "CUCUTA"
+# ---------- Datos fijos (en GitHub se leen de los Secrets; en tu PC se usan estos valores) ----------
+NOMBRE = os.environ.get("NOMBRE") or "JHON ALEXANDER RODRIGUEZ NIÑO"
+CEDULA = os.environ.get("CEDULA") or "1005039272"
+CIUDAD = os.environ.get("CIUDAD") or "CUCUTA"
 
-# ---------- Datos fijos de la moto  <-- CAMBIA ESTOS VALORES POR LOS REALES ----------
-PLACA = "YCQ56G"
-MARCA = "PULSAR"
-MODELO = "2024"
-CILINDRAJE = "160"
+PLACA = os.environ.get("PLACA") or "YCQ56G"
+MARCA = os.environ.get("MARCA") or "PULSAR"
+MODELO = os.environ.get("MODELO") or "2024"
+CILINDRAJE = os.environ.get("CILINDRAJE") or "160"
 
-# ---------- Kilometraje: aumenta 15 km por día ----------
-KM_INICIAL = 15000                      # <-- kilometraje REAL de tu moto en FECHA_BASE
+# ---------- Kilometraje ----------
+KM_INICIAL = int(os.environ.get("KM_INICIAL") or "15000")   # kilometraje REAL en FECHA_BASE
 FECHA_BASE = datetime(2026, 10, 9)
 KM_POR_DIA = 15
 
@@ -35,22 +40,72 @@ OBSERVACIONES = "SIN NOVEDAD"
 # ---------- Ajustes del Bot ----------
 CONFIRMAR_SALUD = False
 CONFIRMAR_REVISION = False
-APAGAR_PC_AL_TERMINAR = True  # <-- Cambia a False si NO quieres que se apague solo
+APAGAR_PC_AL_TERMINAR = True   # solo aplica en tu PC con Windows; en GitHub se ignora
 
-# ---------- Perfil de Chrome propio del bot (guarda tu sesión de Microsoft) ----------
-PERFIL_BOT = r"C:\Users\Usuario\bot_chrome_perfil"
+# ---------- Chrome del bot (solo para tu PC con Windows) ----------
+CHROME_EXE = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+PERFIL_BOT = r"C:\bot_chrome_perfil_nuevo"
+PUERTO = 9222
 
 
 # ======================= FUNCIONES AUXILIARES =======================
 
+def cerrar_chrome():
+    """Cierra Chrome y chromedriver para evitar perfiles en uso (solo Windows)."""
+    for proceso in ("chrome.exe", "chromedriver.exe"):
+        subprocess.run(["taskkill", "/F", "/IM", proceso],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    time.sleep(2)
+
+
+def limpiar_bloqueos():
+    """Borra archivos que Chrome deja cuando se cierra mal."""
+    for nombre in ("lockfile", "SingletonLock", "SingletonCookie",
+                   "SingletonSocket", "DevToolsActivePort"):
+        ruta = os.path.join(PERFIL_BOT, nombre)
+        try:
+            if os.path.exists(ruta):
+                os.remove(ruta)
+        except Exception:
+            pass
+
+
 def crear_driver():
+    # ----- Modo servidor (GitHub Actions) -----
+    if EN_GITHUB:
+        opciones = webdriver.ChromeOptions()
+        opciones.add_argument("--headless=new")
+        opciones.add_argument("--no-sandbox")
+        opciones.add_argument("--disable-dev-shm-usage")
+        opciones.add_argument("--window-size=1366,900")
+        opciones.add_argument("--lang=es-CO")
+        return webdriver.Chrome(options=opciones)
+
+    # ----- Modo Windows (tu PC) -----
+    cerrar_chrome()
+    os.makedirs(PERFIL_BOT, exist_ok=True)
+    limpiar_bloqueos()
+
+    subprocess.Popen([
+        CHROME_EXE,
+        f"--remote-debugging-port={PUERTO}",
+        f"--user-data-dir={PERFIL_BOT}",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--start-maximized",
+    ])
+
+    for _ in range(30):
+        try:
+            urllib.request.urlopen(f"http://127.0.0.1:{PUERTO}/json/version", timeout=1)
+            break
+        except Exception:
+            time.sleep(1)
+    else:
+        raise RuntimeError("Chrome no abrió. Revisa la ruta de CHROME_EXE o el antivirus.")
+
     opciones = webdriver.ChromeOptions()
-    opciones.add_argument(f"--user-data-dir={PERFIL_BOT}")
-    opciones.add_argument("--start-maximized")
-    opciones.add_argument("--no-first-run")
-    opciones.add_argument("--no-default-browser-check")
-    opciones.add_argument("--disable-features=ChromeWhatsNewUI")
-    # opciones.add_argument("--headless=new")   # actívalo solo cuando todo funcione sin errores
+    opciones.debugger_address = f"127.0.0.1:{PUERTO}"
     return webdriver.Chrome(options=opciones)
 
 
@@ -90,12 +145,14 @@ def marcar_todo_bueno(driver):
 
 
 def esperar_formulario(driver):
-    """Espera el campo de fecha. Si aparece el login, te da 3 minutos para iniciar sesión a mano."""
+    """Espera el campo de fecha. En tu PC, si aparece el login, te da 3 minutos para iniciar sesión."""
     xpath_fecha = "//input[starts-with(@id,'DatePicker')]"
     try:
         WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.XPATH, xpath_fecha)))
     except TimeoutException:
+        if EN_GITHUB:
+            raise RuntimeError("El formulario no cargó (¿pide inicio de sesión de Microsoft?).")
         print("⚠️ No apareció el formulario. Si ves una pantalla de inicio de sesión,")
         print("   inicia sesión en el navegador ahora (tienes 3 minutos).")
         WebDriverWait(driver, 180).until(
@@ -104,38 +161,33 @@ def esperar_formulario(driver):
 
 
 def poner_fecha_hoy(driver, wait):
-    """Pone la fecha de hoy asegurando el formato correcto (DD/MM/YYYY)."""
+    """Pone la fecha de hoy en formato DD/MM/YYYY."""
     xpath_campo = "//input[starts-with(@id,'DatePicker')]"
     campo = wait.until(EC.element_to_be_clickable((By.XPATH, xpath_campo)))
-    time.sleep(1) # Deja que los scripts de la página carguen
+    time.sleep(1)   # deja que los scripts de la página carguen
 
-    # 1. Formato con ceros a la izquierda (ej. 09/10/2026).
     fecha_str = datetime.now().strftime("%d/%m/%Y")
 
     try:
-        # 2. Hacer clic en el campo para enfocarlo
         driver.execute_script("arguments[0].scrollIntoView({block:'center'});", campo)
         campo.click()
         time.sleep(0.5)
 
-        # 3. Borrar lo que haya (Windows/Linux usan Ctrl+A)
         campo.send_keys(Keys.CONTROL, "a")
         campo.send_keys(Keys.BACKSPACE)
         time.sleep(0.2)
 
-        # 4. Escribir la fecha y presionar TAB para confirmar
         campo.send_keys(fecha_str)
         time.sleep(0.5)
         campo.send_keys(Keys.TAB)
         time.sleep(1)
 
-        # 5. Verificamos si quedó escrita
         valor_actual = driver.execute_script("return arguments[0].value;", campo)
         if valor_actual:
             print(f"✅ Fecha puesta exitosamente: {valor_actual}")
             return
-            
-        # PLAN B: Si el teclado no funcionó, forzamos el valor directo en React
+
+        # PLAN B: forzar el valor directo en React
         print("Intentando forzar la fecha por JavaScript...")
         driver.execute_script("""
             let el = arguments[0];
@@ -144,9 +196,15 @@ def poner_fecha_hoy(driver, wait):
             setter.call(el, val);
             el.dispatchEvent(new Event('input', {bubbles: true}));
             el.dispatchEvent(new Event('change', {bubbles: true}));
+            el.blur();
         """, campo, fecha_str)
         time.sleep(1)
-        
+
+        valor_actual = driver.execute_script("return arguments[0].value;", campo)
+        if not valor_actual:
+            raise Exception("El campo de fecha quedó vacío")
+        print(f"✅ Fecha puesta por JavaScript: {valor_actual}")
+
     except Exception as e:
         raise Exception(f"No se pudo poner la fecha. Detalles: {e}")
 
@@ -168,7 +226,8 @@ def llenar_formulario_diario():
         poner_fecha_hoy(driver, wait)
 
         if SOLO_PROBAR_FECHA:
-            input("Modo prueba: mira el campo de fecha. Enter para cerrar...")
+            if not EN_GITHUB:
+                input("Modo prueba: mira el campo de fecha. Enter para cerrar...")
             driver.quit()
             return
 
@@ -187,7 +246,7 @@ def llenar_formulario_diario():
         # ---------- PÁGINA 3: Condiciones de salud ----------
         pagina = "3 (Salud)"
         print("Página 3...")
-        if CONFIRMAR_SALUD:
+        if CONFIRMAR_SALUD and not EN_GITHUB:
             resp = input("¿Confirmas que estás en condiciones óptimas para conducir? (s/n): ")
             if resp.strip().lower() != "s":
                 print("⛔ No se envió el formulario.")
@@ -228,7 +287,7 @@ def llenar_formulario_diario():
         # ---------- PÁGINA 5: Revisión de la moto ----------
         pagina = "5 (Revisión)"
         print("Página 5...")
-        if CONFIRMAR_REVISION:
+        if CONFIRMAR_REVISION and not EN_GITHUB:
             resp = input("¿Revisaste la moto y todo está BUENO? (s/n): ")
             if resp.strip().lower() != "s":
                 print("⛔ No se envió el formulario.")
@@ -268,9 +327,9 @@ def llenar_formulario_diario():
         print("✅ Formulario enviado.")
         driver.quit()
 
-        # --- APAGADO AUTOMÁTICO DEL PC ---
-        if APAGAR_PC_AL_TERMINAR:
-            print("Apagando el equipo en 60 segundos... (presiona Windows + R y escribe 'shutdown /a' para cancelar)")
+        # --- APAGADO AUTOMÁTICO DEL PC (solo en tu PC, nunca en GitHub) ---
+        if APAGAR_PC_AL_TERMINAR and not EN_GITHUB:
+            print("Apagando el equipo en 60 segundos... (Windows + R y escribe 'shutdown /a' para cancelar)")
             os.system("shutdown /s /t 60")
 
     except Exception as e:
@@ -279,7 +338,8 @@ def llenar_formulario_diario():
             print("URL actual:", driver.current_url)
             driver.save_screenshot("error.png")
             print("Captura guardada como error.png")
-            input("Mira el navegador y presiona Enter para cerrar...")
+            if not EN_GITHUB:
+                input("Mira el navegador y presiona Enter para cerrar...")
         except Exception:
             print("El navegador ya se había cerrado.")
         finally:
@@ -287,6 +347,7 @@ def llenar_formulario_diario():
                 driver.quit()
             except Exception:
                 pass
+        raise SystemExit(1)   # GitHub marca la ejecución como fallida
 
 
 if __name__ == "__main__":
